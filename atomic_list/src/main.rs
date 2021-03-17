@@ -12,20 +12,29 @@ struct Node {
 }
 
 fn find(head: &Arc<Mutex<Node>>) -> (ManuallyDrop<MutexGuard<Node>>, ManuallyDrop<MutexGuard<Node>>) {
-   loop {
-       // Artificially extend the lifetime of the guards so we can use them later
-        let one = ManuallyDrop::new(head.lock().unwrap());
-        let one_cell: UnsafeCell<ManuallyDrop<MutexGuard<Node>>> = one.into();
-        let one = &one_cell;
+    let prev = head;
+    // Artificially extend the lifetime of the guards so we can use them later
+    let prev = ManuallyDrop::new(prev.lock().unwrap());
+    let prev_cell: UnsafeCell<ManuallyDrop<MutexGuard<Node>>> = prev.into();
 
-        // SAFETY: one is alive as long as we want it to, so is two, so there is no 
-        // way of deallocating either of them by mistake, so the references are valid
-        // We need the UnsafeCell so that we can create "two" from "one"
-        let two = unsafe {
-            ManuallyDrop::new((&*one.get()).next.as_ref().unwrap().lock().unwrap())
+    // SAFETY: There is no other reference using prev_cell.
+    let mut curr = unsafe {
+        ManuallyDrop::new((&*prev_cell.get()).next.as_ref().unwrap().lock().unwrap())
+    };
+    let mut prev = prev_cell.into_inner();
+    loop {
+        let _ = ManuallyDrop::into_inner(prev);
+        prev = curr;
+        let prev_cell: UnsafeCell<ManuallyDrop<MutexGuard<Node>>> = prev.into();
+
+        curr = unsafe {
+            ManuallyDrop::new((&*prev_cell.get()).next.as_ref().unwrap().lock().unwrap())
         };
-        let one = one_cell.into_inner();
-        break (one, two)
+        prev = prev_cell.into_inner();
+        prev = unsafe { std::mem::transmute::<ManuallyDrop<MutexGuard<Node>>, ManuallyDrop<MutexGuard<Node>>>(prev) };
+        if curr.val == 4 {
+            break (prev, curr)
+        }
     }
 }
 
@@ -37,7 +46,7 @@ fn main() {
     let fst = Node { val : 1, next: Some(Arc::new(Mutex::new(snd))) };
     let fst = Arc::new(Mutex::new(fst));
 
-    let (mut f, mut s) = find(&fst);
+    let (mut f, s) = find(&fst);
 
     println!("f val {}", f.val);
     f.next = None;
