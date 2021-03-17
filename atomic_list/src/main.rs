@@ -17,22 +17,37 @@ fn find(head: &Arc<Mutex<Node>>) -> (ManuallyDrop<MutexGuard<Node>>, ManuallyDro
     let prev = ManuallyDrop::new(prev.lock().unwrap());
     let prev_cell: UnsafeCell<ManuallyDrop<MutexGuard<Node>>> = prev.into();
 
-    // SAFETY: There is no other reference using prev_cell.
+    // SAFETY: There is no other reference using prev_cell. So we are safe to use it here
+    // We use it via the UnsafeCell because while getting the next node we really don't want
+    // to move. All of this is also sustained by the fact that prev is alive until the start of the
+    // loop.
     let mut curr = unsafe {
         ManuallyDrop::new((&*prev_cell.get()).next.as_ref().unwrap().lock().unwrap())
     };
+
     let mut prev = prev_cell.into_inner();
     loop {
+        // Now that we own two adjacent locks, release the first one so we can keep traversing
+        // the list. 
         let _ = ManuallyDrop::into_inner(prev);
         prev = curr;
         let prev_cell: UnsafeCell<ManuallyDrop<MutexGuard<Node>>> = prev.into();
 
+        // SAFETY: This is the only use of the reference. This is used so we do not 
+        // move prev into this call
         curr = unsafe {
             ManuallyDrop::new((&*prev_cell.get()).next.as_ref().unwrap().lock().unwrap())
         };
         prev = prev_cell.into_inner();
+        // SAFETY: This is the most important aspect of the hand over hand locking:
+        // we are extending the liftime of prev. This call is safe because we know prev
+        // lives until the start of the next iteration (unless we break out), because
+        // it is a ManuallyDrop, so the compiler won't try to free it and pull the rug from under
+        // us
         prev = unsafe { std::mem::transmute::<ManuallyDrop<MutexGuard<Node>>, ManuallyDrop<MutexGuard<Node>>>(prev) };
         if curr.val == 4 {
+            // Desired value found, return the owned nodes. The caller must ensure
+            // that ManuallyDrop::into_inner is called on the two guards so that they are released
             break (prev, curr)
         }
     }
