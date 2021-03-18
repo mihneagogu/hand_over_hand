@@ -1,5 +1,5 @@
 [package]
-name = "atomic_list"
+name = "concurrent_set"
 version = "0.1.0"
 authors = ["Mihnea Gogu <gogumihnea@gmail.com>"]
 edition = "2018"
